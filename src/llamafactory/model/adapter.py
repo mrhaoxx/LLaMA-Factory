@@ -21,7 +21,6 @@ from transformers.integrations import is_deepspeed_zero3_enabled
 
 from ..extras import logging
 from ..extras.constants import EngineName
-from .model_utils.ktransformers import get_kt_peft_model, load_kt_peft_model
 from .model_utils.misc import find_all_linear_modules, find_expanded_modules
 from .model_utils.quantization import QuantizationMethod
 from .model_utils.unsloth import get_unsloth_peft_model, load_unsloth_peft_model
@@ -188,7 +187,7 @@ def _setup_lora_tuning(
             "token": model_args.hf_hub_token,
         }
 
-        if model_args.use_kt:
+        if model_args.use_kt and not is_trainable:
             if model_args.infer_backend != EngineName.KT:
                 raise ValueError(
                     "We should use ktransformers as backend to infer the adapter fine-tuned by ktransformers."
@@ -203,6 +202,7 @@ def _setup_lora_tuning(
 
         if adapter_to_resume is not None:  # resume lora training
             if model_args.use_kt:
+                from .model_utils.ktransformers import load_kt_peft_model
                 model = load_kt_peft_model(model_args, model)
             elif model_args.use_unsloth:
                 model = load_unsloth_peft_model(config, model_args, finetuning_args, is_trainable=is_trainable)
@@ -220,9 +220,9 @@ def _setup_lora_tuning(
         if model_args.use_kt:
             new_list = []
             for m in target_modules:
-                if m in ("down_proj", "up_proj", "gate_proj"):
-                    new_list.extend([f"mlp.{m}", f"shared_experts.{m}"])
-                elif m not in ("generate_linear", "orig_module", "prefill_linear"):
+                # if m in ("down_proj", "up_proj", "gate_proj"):
+                #     new_list.extend([f"mlp.{m}", f"shared_experts.{m}"])
+                if m not in ("generate_linear", "orig_module", "prefill_linear"):
                     new_list.append(m)
 
             target_modules[:] = new_list
@@ -270,6 +270,8 @@ def _setup_lora_tuning(
             }
 
         if model_args.use_kt:
+            from .model_utils.ktransformers import get_kt_peft_model, load_kt_peft_model
+            
             if finetuning_args.finetuning_type == "oft":
                 raise ValueError("KTransformers is currently not supported for OFT.")
             if finetuning_args.finetuning_type == "lora":
@@ -310,6 +312,7 @@ def _setup_lora_tuning(
                     **peft_kwargs,
                 )
             model = get_peft_model(model, peft_config)
+            print(f"LORA_model:{model}")
 
     if is_trainable and cast_trainable_params_to_fp32:
         for param in filter(lambda p: p.requires_grad, model.parameters()):
